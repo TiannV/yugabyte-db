@@ -245,3 +245,16 @@ it could be successfully compiled with openssl-1.0.x, since after 1.1.x these AP
      CRYPTO_THREADID_set_callback(nullptr);
 +#endif
 ```
+
+## 3.0 crc
+### error info
+```
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/crc.cc.o: In function `yb::crc::InitCrc32cInstance()':
+src/yb/util/crc.cc:50: undefined reference to `crcutil_interface::CRC::CreateCrc32c(bool, unsigned long, unsigned long, void const**)'
+collect2: error: ld returned 1 exit status
+```
+
+### solve
+The yugabute thirdparty package `crcutil-440ba7babeff77ffad992df3a10c767f184e946e.tar.gz` doesn't support aarch64, use `https://github.com/cloudera/crcutil.git` to instead
+
+
