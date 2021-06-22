@@ -213,5 +213,35 @@ https://github.com/yugabyte/yugabyte-db/issues/8928
 
 solve with https://github.com/libunwind/libunwind/pull/244/commits/d1dd1881e69e3bbd69de8d94d5f6fb8fcaa98eba
 
+## 2.9 encryption_util
+### error info
+```
+src/yb/util/encryption_util.cc: In constructor ‘yb::enterprise::OpenSSLInitializer::OpenSSLInitializer()’:
+src/yb/util/encryption_util.cc:201:44: error: statement has no effect [-Werror=unused-value]
+     CRYPTO_THREADID_set_callback(&ThreadId);
+                                            ^
+src/yb/util/encryption_util.cc: In destructor ‘yb::enterprise::OpenSSLInitializer::~OpenSSLInitializer()’:
+src/yb/util/encryption_util.cc:206:42: error: statement has no effect [-Werror=unused-value]
+     CRYPTO_THREADID_set_callback(nullptr);
+```
 
+### solve
+it could be successfully compiled with openssl-1.0.x, since after 1.1.x these APIs are unimplemented and ineffective. refer to this commit: openssl/openssl@2e52e7d
 
+```
+ class OpenSSLInitializer {
+@@ -153,12 +155,16 @@ class OpenSSLInitializer {
+       crypto_mutexes.emplace_back(std::make_unique<std::mutex>());
+     }
+     CRYPTO_set_locking_callback(&LockingCallback);
++#if !defined(CRYPTO_THREADID_set_callback)
+     CRYPTO_THREADID_set_callback(&ThreadId);
++#endif
+   }
+
+   ~OpenSSLInitializer() {
+     CRYPTO_set_locking_callback(nullptr);
++#if !defined(CRYPTO_THREADID_set_callback)
+     CRYPTO_THREADID_set_callback(nullptr);
++#endif
+```
