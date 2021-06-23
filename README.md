@@ -307,6 +307,9 @@ src/yb/common/key_encoder.h:37:10: fatal error: nmmintrin.h: No such file or dir
 ```
 
 ### solve
+remove `include <nmmintrin.h`
+~~#include <nmmintrin.h>~~
+
 add `__aarch64__` in `src/yb/common/key_encoder.h`
 
 ```
@@ -314,7 +317,18 @@ add `__aarch64__` in `src/yb/common/key_encoder.h`
 #include <emmintrin.h>
 #include <smmintrin.h>
 #endif
-~~#include <nmmintrin.h>~~
+```
+and 
+```
+static bool SSEEncodeChunk(const uint8_t** srcp, uint8_t** dstp) {
+  #ifdef __aarch64__
+  return false;
+  #else
+  ...
+  ...
+  ...
+  #endif //__aarch64__
+}
 ```
 
 
