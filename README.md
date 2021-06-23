@@ -258,3 +258,63 @@ collect2: error: ld returned 1 exit status
 The yugabute thirdparty package `crcutil-440ba7babeff77ffad992df3a10c767f184e946e.tar.gz` doesn't support aarch64, use `https://github.com/cloudera/crcutil.git` to instead
 
 
+## atomic
+### error info
+```
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/physical_time.cc.o: In function boost::atomics::detail::emulated_operations<16ul, false>::store(unsigned __int128 volatile&, unsigned __int128, boost::memory_order)':
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:47: undefined reference toboost::atomics::detail::lockpool::scoped_lock::scoped_lock(void const volatile)'
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:47: undefined reference to boost::atomics::detail::lockpool::scoped_lock::~scoped_lock()'
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/physical_time.cc.o: In functionboost::atomics::detail::emulated_operations<16ul, false>::load(unsigned __int128 const volatile&, boost::memory_order)':
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference to boost::atomics::detail::lockpool::scoped_lock::scoped_lock(void const volatile*)'
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference toboost::atomics::detail::lockpool::scoped_lock::~scoped_lock()'
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/debug-util.cc.o: In function boost::atomics::detail::emulated_operations<16ul, false>::load(unsigned __int128 const volatile&, boost::memory_order)':
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference toboost::atomics::detail::lockpool::scoped_lock::scoped_lock(void const volatile)'
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference to boost::atomics::detail::lockpool::scoped_lock::~scoped_lock()'
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/debug-util.cc.o: In functionboost::atomics::detail::emulated_operations<16ul, false>::compare_exchange_weak(unsigned __int128 volatile&, unsigned __int128&, unsigned __int128, boost::memory_order, boost::memory_order)':
+```
+
+### solve
+add `boost_atomic` in file `src/yb/util/CMakeLists.txt`
+```
+set(UTIL_LIBS
+  boost_system
+  boost_thread
+  boost_atomic
+  cds
+  icui18n
+  icuuc
+  crcutil
+  crypt_blowfish
+  gflags
+  glog
+  gutil
+  histogram_proto
+  libev
+  pb_util_proto
+  protobuf
+  version_info_proto
+  encryption_proto
+  zlib
+  ${OPENSSL_CRYPTO_LIBRARY}
+  ${OPENSSL_SSL_LIBRARY})
+```
+
+## nmmintrin
+### error info
+```
+src/yb/common/key_encoder.h:37:10: fatal error: nmmintrin.h: No such file or directory
+ #include <nmmintrin.h>
+```
+
+### solve
+add `__aarch64__` in `src/yb/common/key_encoder.h`
+
+```
+#ifndef __aarch64__
+#include <emmintrin.h>
+#include <smmintrin.h>
+#endif
+~~#include <nmmintrin.h>~~
+```
+
+
