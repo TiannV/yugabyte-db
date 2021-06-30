@@ -299,6 +299,14 @@ set(UTIL_LIBS
   ${OPENSSL_SSL_LIBRARY})
 ```
 
+and add `atomic` in file `cmake_modules/YugabyteFindThirdParty.cmake`
+```
+# Find Boost static libraries.
+set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost COMPONENTS system thread atomic REQUIRED)
+show_found_boost_details("static")
+```
+
 ## nmmintrin
 ### error info
 ```
