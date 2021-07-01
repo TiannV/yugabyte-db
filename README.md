@@ -75,7 +75,15 @@ cc1plus: error: unknown value ‘ivybridge’ for -march
 cc1plus: note: valid arguments are: armv8-a armv8.1-a armv8.2-a armv8.3-a armv8.4-a native
 ```
 ### solve：
-Temporarily delete 
+delete `-msse4.2 mcx16.....`
+and modify `ivybridge` to `armv8-a+crc`：
+```
+ if (NOT APPLE)
+   # To enable 16-byte atomics support we should specify appropriate architecture.
+-  ADD_CXX_FLAGS("-march=ivybridge")
+-  ADD_CXX_FLAGS("-mcx16")
++  ADD_CXX_FLAGS("-march=armv8-a+crc")
+```
 
 ## 2.3 atomicops
 ### error info:
