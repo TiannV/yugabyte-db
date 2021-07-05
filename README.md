@@ -8,156 +8,343 @@
 [![Slack chat](https://img.shields.io/badge/Slack:-%23yugabyte_db-blueviolet.svg?logo=slack)](https://www.yugabyte.com/slack)
 [![Analytics](https://yugabyte.appspot.com/UA-104956980-4/home?pixel&useReferer)](https://github.com/yugabyte/ga-beacon)
 
-- [What is YugabyteDB?](#what-is-yugabytedb)
-- [Get Started](#get-started)
-- [Build Apps](#build-apps)
-- [What's being worked on?](#whats-being-worked-on)
-- [Architecture](#architecture)
-- [Need Help?](#need-help)
-- [Contribute](#contribute)
-- [License](#license)
-- [Read More](#read-more)
+# 1. compile YB for aarch64
 
-# What is YugabyteDB?
+cpu info:
+```
+# lscpu
+Architecture:          aarch64
+Byte Order:            Little Endian
+CPU(s):                16
+On-line CPU(s) list:   0-15
+Thread(s) per core:    1
+Core(s) per socket:    8
+Socket(s):             2
+NUMA node(s):          2
+Model:                 0
+CPU max MHz:           2400.0000
+CPU min MHz:           2400.0000
+BogoMIPS:              200.00
+L1d cache:             64K
+L1i cache:             64K
+L2 cache:              512K
+L3 cache:              32768K
+NUMA node0 CPU(s):     0-7
+NUMA node1 CPU(s):     8-15
+Flags:                 fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma dcpop asimddp asimdfhm
+```
 
-**YugabyteDB** is a **high-performance, cloud-native distributed SQL database** that aims to support **all PostgreSQL features**. It is best to fit for **cloud-native OLTP (i.e. real-time, business-critical) applications** that need absolute **data correctness** and require at least one of the following: **scalability, high tolerance to failures, or globally-distributed deployments.**
+# 2. compire errors
+## 2.1 unwind-arch
+### error info:
+```
+Call Stack (most recent call first):
+  cmake_modules/YugabyteFindThirdParty.cmake:85 (ADD_THIRDPARTY_LIB)
+  CMakeLists.txt:671 (include)
+```
+
+### solve:
+```
+# cmake_modules/FindLibUnwind.cmake
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+  SET(LIBUNWIND_ARCH "arm")
+elseif (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "amd64")
+  SET(LIBUNWIND_ARCH "x86_64")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^i.86$")
+  SET(LIBUNWIND_ARCH "x86")
+# add by tianv
+elseif (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  SET(LIBUNWIND_ARCH "aarch64")
+endif()
+```
+## 2.2 Compilation options
+### error info:
+```
+g++: error: unrecognized command line option ‘-msse4.2’
+\-------------------------------------------------------------------------------
+g++: error: unrecognized command line option ‘-mcx16’
+g++: error: unrecognized command line option ‘-mno-avx’; did you mean ‘-Wno-abi’?
+g++: error: unrecognized command line option ‘-mno-bmi’; did you mean ‘-Wno-abi’?
+g++: error: unrecognized command line option ‘-mno-bmi2’; did you mean ‘-Wno-abi’?
+g++: error: unrecognized command line option ‘-mno-fma’; did you mean ‘-Wno-hsa’?
+g++: error: unrecognized command line option ‘-mno-abm’; did you mean ‘-Wno-abi’?
+g++: error: unrecognized command line option ‘-mno-movbe’
+g++: error: unrecognized command line option ‘-mno-fma’; did you mean ‘-Wno-hsa’?
+
+cc1plus: error: unknown value ‘ivybridge’ for -march
+cc1plus: note: valid arguments are: armv8-a armv8.1-a armv8.2-a armv8.3-a armv8.4-a native
+```
+### solve：
+delete `-msse4.2 mcx16.....`
+and modify `ivybridge` to `armv8-a+crc`：
+```
+ if (NOT APPLE)
+   # To enable 16-byte atomics support we should specify appropriate architecture.
+-  ADD_CXX_FLAGS("-march=ivybridge")
+-  ADD_CXX_FLAGS("-mcx16")
++  ADD_CXX_FLAGS("-march=armv8-a+crc")
+```
+
+## 2.3 atomicops
+### error info:
+```
+src/yb/gutil/atomicops.h:102:2: error: #error You need to implement atomic operations for this architecture
+ #error You need to implement atomic operations for this architecture
+  ^~~~~
+ ```
+ ### slove:
+ add a new file `yb/gutil/atomicops-internals-aarch64.h`,
+ then include it in `src/yb/gutil/atomicops.h`:
+ ```
+ #if defined(THREAD_SANITIZER)
+#include "yb/gutil/atomicops-internals-tsan.h"
+...
+...
+#elif defined(__aarch64__) || defined(__aarch64)
+#include "yb/gutil/atomicops-internals-aarch64.h"
+#else
+#error You need to implement atomic operations for this architecture
+#endif
+```
+
+## 2.4 cpu
+### error info
+```
+src/yb/gutil/cpu.cc:288:4: error: #error unknown architecture
+   #error unknown architecture
+    ^~~~~
+```
+
+### solve
+add `defined(__aarch64__) ` in `src/yb/gutil/cpu.cc`
+```
+#elif defined(ARCH_CPU_ARM_FAMILY) && (defined(OS_ANDROID) || defined(__linux__))
+  cpu_brand_.assign(g_lazy_cpuinfo.Get().brand());
+  has_broken_neon_ = g_lazy_cpuinfo.Get().has_broken_neon();
+#elif defined(__aarch64__)
+  cpu_brand_.assign("ARM64");
+  has_broken_neon_ = false;
+#else
+  #error unknown architecture
+#endif
+```
+## 2.5 CycleTimer
+### error info
+```
+src/yb/gutil/cycleclock-inl.h:214:2: error: #error You need to define CycleTimer for your O/S and CPU
+ #error You need to define CycleTimer for your O/S and CPU
+  ^~~~~
+```
+
+### solve
+add `defined(__aarch64__) ` in `src/yb/gutil/cycleclock-inl.h`
+```
+#elif defined(__aarch64__)
+  // System timer of ARMv8 runs at a different frequency than the CPU's.
+  // The frequency is fixed, typically in the range 1-50MHz.  It can be
+  // read at CNTFRQ special register.  We assume the OS has set up
+  // the virtual timer properly.
+inline int64 CycleClock::Now() {
+  int64 virtual_timer_value;
+
+  asm volatile("mrs %0, cntvct_el0" : "=r"(virtual_timer_value));
+
+  return virtual_timer_value;
+}
+```
+## 2.6 spinlock
+### error info
+```
+src/yb/gutil/spinlock_linux-inl.h:74:19: error: ‘sys_futex’ was not declared in this scope
+                   sys_futex(&x, FUTEX_WAKE, 1, 0) >= 0);
+                   ^~~~~~~~~
+src/yb/gutil/spinlock_linux-inl.h:74:19: note: suggested alternative: ‘have_futex’
+                   sys_futex(&x, FUTEX_WAKE, 1, 0) >= 0);
+```
+
+### solve
+ARM linux doesn't support sys_futex1(void*, int, int, struct timespec*);
+
+So use `syscall` to instead.
+
+```
+    if (have_futex && syscall(__NR_futex, &x, FUTEX_WAKE | futex_private_flag,
+                              1, NULL, NULL, 0) < 0) {
+      futex_private_flag = 0;
+    }
+```
+
+## 2.7 NR_gettid
+### error info 
+```
+src/yb/gutil/threading/thread_collision_warner.cc:54:18: error: ‘__NR_gettid’ was not declared in this scope
+   return syscall(__NR_gettid);
+                  ^~~~~~~~~~~
+src/yb/gutil/threading/thread_collision_warner.cc:54:18: note: suggested alternative: ‘__getpgid’
+   return syscall(__NR_gettid);
+                  ^~~~~~~~~~~
+                  __getpgi
+```
+
+### solve
+add `defined(__aarch64__)`
+```
+// src/yb/gutil/threading/thread_collision_warner.cc
+static subtle::Atomic64 CurrentThread() {
+#if defined(__APPLE__)
+  uint64_t tid;
+  CHECK_EQ(0, pthread_threadid_np(NULL, &tid));
+  return tid;
+#elif defined(__aarch64__)
+#include <unistd.h>
+  return getpid();
+#elif defined(__linux__)
+  return syscall(__NR_gettid);
+#endif
+}
+```
+
+## 2.8 protoc-gen-insertions
+### error info:
+```
+make[2]: *** [src/yb/util/CMakeFiles/gen_src_yb_util_version_info_proto.dir/all] Error 2
+make[2]: *** Waiting for unfinished jobs....
+make[3]: *** [src/yb/util/histogram.pb.cc] Error 1
+--insertions_out: protoc-gen-insertions: Plugin killed by signal 11.
+make[2]: *** [src/yb/util/CMakeFiles/gen_src_yb_util_histogram_proto.dir/all] Error 2
+make[3]: *** [src/yb/fs/fs.pb.cc] Error 1
+--insertions_out: protoc-gen-insertions: Plugin killed by signal 11.
+```
+
+### solve
+https://github.com/yugabyte/yugabyte-db/issues/8928
+
+solve with https://github.com/libunwind/libunwind/pull/244/commits/d1dd1881e69e3bbd69de8d94d5f6fb8fcaa98eba
+
+## 2.9 encryption_util
+### error info
+```
+src/yb/util/encryption_util.cc: In constructor ‘yb::enterprise::OpenSSLInitializer::OpenSSLInitializer()’:
+src/yb/util/encryption_util.cc:201:44: error: statement has no effect [-Werror=unused-value]
+     CRYPTO_THREADID_set_callback(&ThreadId);
+                                            ^
+src/yb/util/encryption_util.cc: In destructor ‘yb::enterprise::OpenSSLInitializer::~OpenSSLInitializer()’:
+src/yb/util/encryption_util.cc:206:42: error: statement has no effect [-Werror=unused-value]
+     CRYPTO_THREADID_set_callback(nullptr);
+```
+
+### solve
+it could be successfully compiled with openssl-1.0.x, since after 1.1.x these APIs are unimplemented and ineffective. refer to this commit: openssl/openssl@2e52e7d
+
+```
+ class OpenSSLInitializer {
+@@ -153,12 +155,16 @@ class OpenSSLInitializer {
+       crypto_mutexes.emplace_back(std::make_unique<std::mutex>());
+     }
+     CRYPTO_set_locking_callback(&LockingCallback);
++#if !defined(CRYPTO_THREADID_set_callback)
+     CRYPTO_THREADID_set_callback(&ThreadId);
++#endif
+   }
+
+   ~OpenSSLInitializer() {
+     CRYPTO_set_locking_callback(nullptr);
++#if !defined(CRYPTO_THREADID_set_callback)
+     CRYPTO_THREADID_set_callback(nullptr);
++#endif
+```
+
+## 3.0 crc
+### error info
+```
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/crc.cc.o: In function `yb::crc::InitCrc32cInstance()':
+src/yb/util/crc.cc:50: undefined reference to `crcutil_interface::CRC::CreateCrc32c(bool, unsigned long, unsigned long, void const**)'
+collect2: error: ld returned 1 exit status
+```
+
+### solve
+The yugabute thirdparty package `crcutil-440ba7babeff77ffad992df3a10c767f184e946e.tar.gz` doesn't support aarch64, use `https://github.com/cloudera/crcutil.git` to instead
 
 
-The core features of YugabyteDB include:
+## atomic
+### error info
+```
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/physical_time.cc.o: In function boost::atomics::detail::emulated_operations<16ul, false>::store(unsigned __int128 volatile&, unsigned __int128, boost::memory_order)':
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:47: undefined reference toboost::atomics::detail::lockpool::scoped_lock::scoped_lock(void const volatile)'
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:47: undefined reference to boost::atomics::detail::lockpool::scoped_lock::~scoped_lock()'
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/physical_time.cc.o: In functionboost::atomics::detail::emulated_operations<16ul, false>::load(unsigned __int128 const volatile&, boost::memory_order)':
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference to boost::atomics::detail::lockpool::scoped_lock::scoped_lock(void const volatile*)'
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference toboost::atomics::detail::lockpool::scoped_lock::~scoped_lock()'
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/debug-util.cc.o: In function boost::atomics::detail::emulated_operations<16ul, false>::load(unsigned __int128 const volatile&, boost::memory_order)':
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference toboost::atomics::detail::lockpool::scoped_lock::scoped_lock(void const volatile)'
+/opt/yb-build/thirdparty/yugabyte-db-thirdparty-v20210210192532-45c97f45f1-centos7-linuxbrew/installed/uninstrumented/include/boost/atomic/detail/ops_emulated.hpp:53: undefined reference to boost::atomics::detail::lockpool::scoped_lock::~scoped_lock()'
+build/release-gcc-dynamic/src/yb/util/CMakeFiles/yb_util.dir/debug-util.cc.o: In functionboost::atomics::detail::emulated_operations<16ul, false>::compare_exchange_weak(unsigned __int128 volatile&, unsigned __int128&, unsigned __int128, boost::memory_order, boost::memory_order)':
+```
 
-* **Powerful RDBMS capabilities** Yugabyte SQL (*YSQL* for short) reuses the query layer of PostgreSQL (similar to Amazon Aurora PostgreSQL), thereby supporting most of its features (datatypes, queries, expressions, operators and functions, stored procedures, triggers, extensions, etc). Here is a detailed [list of features currently supported by YSQL](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/YSQL-Features-Supported.md).
+### solve
+add `boost_atomic` in file `src/yb/util/CMakeLists.txt`
+```
+set(UTIL_LIBS
+  boost_system
+  boost_thread
+  boost_atomic
+  cds
+  icui18n
+  icuuc
+  crcutil
+  crypt_blowfish
+  gflags
+  glog
+  gutil
+  histogram_proto
+  libev
+  pb_util_proto
+  protobuf
+  version_info_proto
+  encryption_proto
+  zlib
+  ${OPENSSL_CRYPTO_LIBRARY}
+  ${OPENSSL_SSL_LIBRARY})
+```
 
-* **Distributed transactions** The transaction design is based on the Google Spanner architecture. Strong consistency of writes is achieved by using Raft consensus for replication and cluster-wide distributed ACID transactions using *hybrid logical clocks*. *Snapshot* and *serializable* isolation levels are supported. Reads (queries) have strong consistency by default, but can be tuned dynamically to read from followers and read-replicas.
+and add `atomic` in file `cmake_modules/YugabyteFindThirdParty.cmake`
+```
+# Find Boost static libraries.
+set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost COMPONENTS system thread atomic REQUIRED)
+show_found_boost_details("static")
+```
 
-* **Continuous availability** YugabyteDB is extremely resilient to common outages with native failover and repair. YugabyteDB can be configured to tolerate disk, node, zone, region, and cloud failures automatically. For a typical deployment where a YugabyteDB cluster is deployed in one region across multiple zones on a public cloud, the RPO is 0 (meaning no data is lost on failure) and the RTO is 3 seconds (meaning the data being served by the failed node is available in 3 seconds).
+## nmmintrin
+### error info
+```
+src/yb/common/key_encoder.h:37:10: fatal error: nmmintrin.h: No such file or directory
+ #include <nmmintrin.h>
+```
 
-* **Horizontal scalability** Scaling a YugabyteDB cluster to achieve more IOPS or data storage is as simple as adding nodes to the cluster.
+### solve
+remove `include <nmmintrin.h`
+~~#include <nmmintrin.h>~~
 
-* **Geo-distributed, multi-cloud** YugabyteDB can be deployed in public clouds and natively inside Kubernetes. It supports deployments that span three or more fault domains, such as multi-zone, multi-region, and multi-cloud deployments. It also supports xCluster asynchronous replication with unidirectional master-slave and bidirectional multi-master configurations that can be leveraged in two-region deployments. To serve (stale) data with low latencies, read replicas are also a supported feature.
+add `__aarch64__` in `src/yb/common/key_encoder.h`
 
-* **Multi API design** The query layer of YugabyteDB is built to be extensible. Currently, YugabyteDB supports two distributed SQL APIs: **[Yugabyte SQL (YSQL)](https://docs.yugabyte.com/latest/api/ysql/)**, a fully relational API that re-uses query layer of PostgreSQL, and **[Yugabyte Cloud QL (YCQL)](https://docs.yugabyte.com/latest/api/ycql/)**, a semi-relational SQL-like API with documents/indexing support with Apache Cassandra QL roots.
-
-* **100% open source** YugabyteDB is fully open-source under the [Apache 2.0 license](https://github.com/yugabyte/yugabyte-db/blob/master/LICENSE.md). The open-source version has powerful enterprise features such as distributed backups, encryption of data-at-rest, in-flight TLS encryption, change data capture, read replicas, and more.
-
-Read more about YugabyteDB in our [Docs](https://docs.yugabyte.com/latest/introduction/).
-
-# Get Started
-
-* [Install YugabyteDB](https://docs.yugabyte.com/latest/quick-start/install/)
-* [Create a local cluster](https://docs.yugabyte.com/latest/quick-start/create-local-cluster/)
-* [Connect and try out SQL commands](https://docs.yugabyte.com/latest/quick-start/explore-ysql/)
-* [Build an app](https://docs.yugabyte.com/latest/quick-start/build-apps/) using a PostgreSQL-compatible driver or ORM.
-* Try running a real-world demo application:
-    * [Microservices-oriented e-commerce app](https://github.com/yugabyte/yugastore-java)
-    * [Streaming IoT app with Kafka and Spark Streaming](https://docs.yugabyte.com/latest/develop/realworld-apps/iot-spark-kafka-ksql/)
-
-Cannot find what you are looking for? Have a question? Please post your questions or comments on our Community [Slack](https://www.yugabyte.com/slack) or [Forum](https://forum.yugabyte.com).
-
-# Build Apps
-
-YugabyteDB supports several languages and client drivers. Below is a brief list.
-
-| Language  | ORM | YSQL Drivers | YCQL Drivers |
-| --------- | --- | ------------ | ------------ |
-| Java  | [Spring/Hibernate](https://docs.yugabyte.com/latest/quick-start/build-apps/java/ysql-spring-data/) | [PostgreSQL JDBC](https://docs.yugabyte.com/latest/quick-start/build-apps/java/ysql-jdbc/) | [cassandra-driver-core-yb](https://docs.yugabyte.com/latest/quick-start/build-apps/java/ycql/)
-| Go  | [Gorm](https://github.com/yugabyte/orm-examples) | [pq](https://docs.yugabyte.com/latest/quick-start/build-apps/go/#ysql) | [gocql](https://docs.yugabyte.com/latest/quick-start/build-apps/go/#ycql)
-| NodeJS  | [Sequelize](https://github.com/yugabyte/orm-examples) | [pg](https://docs.yugabyte.com/latest/quick-start/build-apps/nodejs/#ysql) | [cassandra-driver](https://docs.yugabyte.com/latest/quick-start/build-apps/nodejs/#ycql)
-| Python  | [SQLAlchemy](https://github.com/yugabyte/orm-examples) | [psycopg2](https://docs.yugabyte.com/latest/quick-start/build-apps/python/#ysql) | [yb-cassandra-driver](https://docs.yugabyte.com/latest/quick-start/build-apps/python/#ycql)
-| Ruby  | [ActiveRecord](https://github.com/yugabyte/orm-examples) | [pg](https://docs.yugabyte.com/latest/quick-start/build-apps/ruby/#ysql) | [yugabyte-ycql-driver](https://docs.yugabyte.com/latest/quick-start/build-apps/ruby/#ycql)
-| C#  | [EntityFramework](https://github.com/yugabyte/orm-examples) | [npgsql](http://www.npgsql.org/) | [CassandraCSharpDriver](https://docs.yugabyte.com/latest/quick-start/build-apps/csharp/#ycql)
-| C++ | Not tested | [libpqxx](https://docs.yugabyte.com/latest/quick-start/build-apps/cpp/#ysql) | [cassandra-cpp-driver](https://docs.yugabyte.com/latest/quick-start/build-apps/cpp/#ycql)
-| C   | Not tested | [libpq](https://docs.yugabyte.com/latest/quick-start/build-apps/c/#ysql) | Not tested
-
-# What's being worked on?
-
-> This section was last updated in **June, 2021**.
-
-## Current roadmap
-
-Here is a list of some of the key features being worked on for the upcoming releases (the YugabyteDB **v2.7 latest release** has been released in **May, 2021**, and the **v2.4 stable release** was released in **Jan 2021**).
-
-| Feature                                         | Status    | Release Target | Progress        |  Comments     |
-| ----------------------------------------------- | --------- | -------------- | --------------- | ------------- |
-| [Automatic tablet splitting enabled by default](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/docdb-automatic-tablet-splitting.md) | PROGRESS  | v2.6, v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/1004) |
-| [Point in time Recovery](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/distributed-backup-point-in-time-recovery.md) | PROGRESS  |  v2.6, v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/7120) |  |
-| YSQL: table statistics and Cost based optimizer(CBO) | PROGRESS  |  v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/5242) |  |
-| [[YSQL] Support `GIN` indexes](https://github.com/jaki/ysql-gin-doc/releases/download/v2.2.1/gin.pdf) | PROGRESS | v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/7850) | |
-| [[YSQL] Feature support - ALTER TABLE](https://github.com/yugabyte/yugabyte-db/issues/1124) | PROGRESS | v2.6, v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/1124) |  |
-| [[YSQL] Online schema migration](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/online-schema-migrations.md)  | PROGRESS  | v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/4192) |  |
-| [YSQL] Collation Support - support COLLATE option for text-based columns | PROGRESS | v2.7           |[Track](https://github.com/yugabyte/yugabyte-db/issues/7853)                 |               |
-[YSQL] Support SAVEPOINT - Transaction Control Commands | PROGRESS | v2.7           |[Track](https://github.com/yugabyte/yugabyte-db/issues/1125) |  |
-| [YCQL] LDAP Support for Yugabyte's YCQL API | PROGRESS | v2.7           |[Track](https://github.com/yugabyte/yugabyte-db/issues/4421)  |  |
-| Incorporate PostgreSQL 12 features | PLANNING  | v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/3725) |  |
-| Improving day 2 operations of Yugabyte Platform | PROGRESS  |  v2.5 | [Track](https://github.com/yugabyte/yugabyte-db/issues/4420) |  |
-| [Row-level geo-partitioning](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/ysql-row-level-partitioning.md) | PROGRESS  |  v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/1958) | Enhance YSQL language support |
-| Improve TPC-C benchmarking | PROGRESS  | v2.7  | [Track](https://github.com/yugabyte/yugabyte-db/issues/3226) |  |
-| Transparently restart transactions | PROGRESS  | v2.5  | [Track](https://github.com/yugabyte/yugabyte-db/issues/5683) | Decrease the incidence of transaction restart errors seen in various scenarios |
-| Pessimistic locking Design | PROGRESS  | v2.7  | [Track](https://github.com/yugabyte/yugabyte-db/issues/5680) |  |
-| Support Liquibase, Flyway, ORM schema migrations | PROGRESS | v2.7           |                 |               |
-
-
-## Planned additions to the roadmap
-
-The following items are being planned as additions to the roadmap.
-
-| Feature                                         | Status    | Release Target | Progress        |  Comments     |
-| ----------------------------------------------- | --------- | -------------- | --------------- | ------------- |
-| Support `pgloader` to migrate from MySQL | PLANNING  |   | [Track](https://github.com/yugabyte/yugabyte-db/issues/3725) | 
-| Make [`COLOCATED` tables](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/ysql-colocated-tables.md) default for YSQL | PLANNING  |  | [Track](https://github.com/yugabyte/yugabyte-db/issues/5239)  |  |
-| Support Kafka as source and sink | PLANNING |  |  | Support source and sink for both YSQL and YCQL |
-| Support for transactions in async [xCluster replication](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/multi-region-2DC-deployment.md) | PLANNING  |    | [Track](https://github.com/yugabyte/yugabyte-db/issues/1808) | Apply transactions atomically on consumer cluster. |
-
-## Recently released features
-
-| Feature                                         | Status    | Release Target | Docs / Enhancements |  Comments     |
-| ----------------------------------------------- | --------- | -------------- | ------------------- | ------------- |
-| Support Spark 3.x on YCQL API | ✅ *DONE* | v2.5, v2.6           |  [Track](https://github.com/yugabyte/yugabyte-db/issues/6488)  |     
-| [Support `ALTER TABLE` add primary key](https://github.com/yugabyte/yugabyte-db/issues/1124) | PROGRESS | v2.6, v2.7 | [Track](https://github.com/yugabyte/yugabyte-db/issues/1124) |  |
-| Identity and access management in YSQL | ✅ *DONE*  | v2.5  | [Track](https://github.com/yugabyte/yugabyte-db/issues/2393) | LDAP and Active Directory support |
-| Follower reads in YSQL | ✅ *BETA* | v2.5 | [Issue](https://github.com/yugabyte/yugabyte-db/issues/5232) | Ability to perform follower reads for YSQL and transactional tables in YCQL.  |
-| YSQL cluster administration features - Node-Level statistics | ✅ *DONE*  | v2.5  | [Issue](https://github.com/yugabyte/yugabyte-db/issues/4194) | Per-node view of currently active queries, find which queries are slow, what active connections are doing, etc. |
-| Support loading large data sets into YSQL using `COPY` | ✅ *DONE*  | v2.5  | [Issue](https://github.com/yugabyte/yugabyte-db/issues/5241) | Improving transactions which have a very large number of operations, as well as provide various options to batch load data more efficiently
-| Database runtime activity monitoring | ✅ *DONE*  | v2.5  | [Issue](https://github.com/yugabyte/yugabyte-db/issues/1331) | Activity monitoring, audit logging, inactivity monitoring |
-| [Online rebuild of indexes](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/online-index-backfill.md)  | ✅ *DONE*  | v2.2 |  | Docs coming soon. See [pending enhancements](https://github.com/yugabyte/yugabyte-db/issues/448) |
-| [`DEFERRED` constraints in YSQL](https://github.com/yugabyte/yugabyte-db/issues/4700) | ✅ *DONE* | v2.2 |  | Docs coming soon. See [pending enhancements](https://github.com/yugabyte/yugabyte-db/issues/4700). |
-| [`COLOCATED` tables](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/ysql-colocated-tables.md) GA | ✅ *DONE*  | v2.2  |  | Docs coming soon |
-| [Online schema migration framework](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/online-schema-migrations.md)  | ✅ *DONE*  | v2.2 |  | Note that this is just the framework implementation. See [planned enhancements](https://github.com/yugabyte/yugabyte-db/issues/4192) in this area. |
-| [Distributed backups for transactional tables](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/distributed-backup-and-restore.md)    | ✅ *DONE* | v2.2  |  | Docs coming soon. See [pending enhancements](https://github.com/yugabyte/yugabyte-db/issues/2620). |
-| IPV6 support for YugabyteDB | ✅ *DONE*  | v2.2 | | Docs coming soon |
-| [Automatic tablet splitting](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/docdb-automatic-tablet-splitting.md) | ✅ *BETA*  | v2.2 | [Docs](https://docs.yugabyte.com/latest/architecture/docdb-sharding/tablet-splitting/) | See [further enhancements](https://github.com/yugabyte/yugabyte-db/issues/1004) |
-| [Change data capture](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/docdb-change-data-capture.md) | ✅ *BETA* |   |  | This feature is currently available but in beta. |
-| [xCluster replication](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/multi-region-2DC-deployment.md) (async cross-cluster replication) | ✅ *DONE* | v2.1 | [Docs](https://docs.yugabyte.com/latest/deploy/multi-dc/2dc-deployment/) |  |
-| [Encryption of data at rest](https://github.com/yugabyte/yugabyte-db/blob/master/architecture/design/docdb-encryption-at-rest.md) | ✅ *DONE* | v2.1 | [Docs](https://docs.yugabyte.com/latest/secure/encryption-at-rest/) |  |
+```
+#ifndef __aarch64__
+#include <emmintrin.h>
+#include <smmintrin.h>
+#endif
+```
+and 
+```
+static bool SSEEncodeChunk(const uint8_t** srcp, uint8_t** dstp) {
+  #ifdef __aarch64__
+  return false;
+  #else
+  ...
+  ...
+  ...
+  #endif //__aarch64__
+}
+```
 
 
-# Architecture
-
-<img src="https://raw.githubusercontent.com/yugabyte/yugabyte-db/master/architecture/images/yb-architecture.jpg" align="center" alt="YugabyteDB Architecture"/>
-
-Review detailed architecture in our [Docs](https://docs.yugabyte.com/latest/architecture/).
-
-# Need Help?
-
-* You can ask questions, find answers, and help others on our Community [Slack](https://www.yugabyte.com/slack) and [Forum](https://forum.yugabyte.com), as well as [Stack Overflow](https://stackoverflow.com/questions/tagged/yugabyte-db).
-
-* Please use [GitHub issues](https://github.com/yugabyte/yugabyte-db/issues) to report issues.
-
-# Contribute
-
-As an an open-source project with a strong focus on the user community, we welcome contributions as GitHub pull requests. See our [Contributor Guides](https://docs.yugabyte.com/latest/contribute/) to get going. Discussions and RFCs for features happen on the design discussions section of [our Forum](https://forum.yugabyte.com).
-
-# License
-
-Source code in this repository is variously licensed under the Apache License 2.0 and the Polyform Free Trial License 1.0.0. A copy of each license can be found in the [licenses](licenses) directory.
-
-The build produces two sets of binaries:
-* The entire database with all its features (including the enterprise ones) are licensed under the Apache License 2.0
-* The  binaries that contain `-managed` in the artifact and help run a managed service are licensed under the Polyform Free Trial License 1.0.0.
-
-> By default, the build options generate only the Apache License 2.0 binaries.
-
-
-# Read More
-
-* To see our updates, go to [The Distributed SQL Blog](https://blog.yugabyte.com/).
-* See how YugabyteDB [compares with other databases](https://docs.yugabyte.com/latest/comparisons/). 
