@@ -31,7 +31,6 @@
 //
 
 #include "yb/util/debug-util.h"
-
 #include <execinfo.h>
 #include <dirent.h>
 #include <signal.h>
@@ -75,6 +74,10 @@
 #include "yb/util/string_trim.h"
 
 using namespace std::literals;
+
+#define FUTEX_WAIT 0
+#define FUTEX_WAKE 1
+#define FUTEX_PRIVATE_FLAG 128
 
 #if defined(__linux__) && !defined(NDEBUG)
 constexpr bool kDefaultUseLibbacktrace = true;
@@ -141,10 +144,13 @@ class CompletionFlag {
   void Signal() {
     complete_.store(1, std::memory_order_release);
 #if USE_FUTEX
-    sys_futex(reinterpret_cast<int32_t*>(&complete_),
-              FUTEX_WAKE | FUTEX_PRIVATE_FLAG,
-              INT_MAX, // wake all
-              0 /* ignored */);
+    syscall(__NR_futex, reinterpret_cast<int32_t*>(&complete_), 
+            FUTEX_WAKE | FUTEX_PRIVATE_FLAG,
+            INT_MAX, NULL, NULL, 0);
+    //sys_futex(reinterpret_cast<int32_t*>(&complete_),
+    //          FUTEX_WAKE | FUTEX_PRIVATE_FLAG,
+    //          INT_MAX, // wake all
+    //          0 /* ignored */);
 #endif
   }
 
@@ -165,10 +171,13 @@ class CompletionFlag {
       kernel_timespec kernel_ts;
       ts.tv_sec = ts.tv_sec;
       ts.tv_nsec = ts.tv_nsec;
-      sys_futex(reinterpret_cast<int32_t*>(&complete_),
-                FUTEX_WAIT | FUTEX_PRIVATE_FLAG,
-                0, // wait if value is still 0
-                &kernel_ts);
+      syscall(__NR_futex, reinterpret_cast<int32_t*>(&complete_),
+              FUTEX_WAKE | FUTEX_PRIVATE_FLAG,
+              0, NULL, NULL, &kernel_ts);
+      //sys_futex(reinterpret_cast<int32_t*>(&complete_),
+      //          FUTEX_WAIT | FUTEX_PRIVATE_FLAG,
+      //          0, // wait if value is still 0
+      //          &kernel_ts);
 #else
       std::this_thread::sleep_for(wait_time);
       wait_time = std::min(wait_time * 2, 100ms);
@@ -411,15 +420,8 @@ class GlobalBacktraceState {
 
     // To complete initialization we should call backtrace, otherwise it could fail in case of
     // concurrent initialization.
-    // We do this in a separate thread to avoid deadlock.
-    // TODO: implement proper fix to avoid other potential deadlocks/stuck threads related
-    // to locking common mutexes from signal handler. See
-    // https://github.com/yugabyte/yugabyte-db/issues/6672 for more details.
-    std::thread backtrace_thread([&] {
-      backtrace_full(bt_state_, /* skip = */ 1, DummyCallback,
-                     BacktraceErrorCallback, nullptr);
-    });
-    backtrace_thread.join();
+    backtrace_full(bt_state_, /* skip = */ 1, DummyCallback,
+                   BacktraceErrorCallback, nullptr);
   }
 
   backtrace_state* GetState() { return bt_state_; }

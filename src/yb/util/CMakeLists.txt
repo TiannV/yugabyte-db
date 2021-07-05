@@ -265,6 +265,7 @@ set(UTIL_SRCS
 set(UTIL_LIBS
   boost_system
   boost_thread
+  boost_atomic
   cds
   icui18n
   icuuc
@@ -284,8 +285,10 @@ set(UTIL_LIBS
   ${OPENSSL_SSL_LIBRARY})
 
 if (NOT APPLE AND NOT USING_LINUXBREW)
+  message("(===========NOT APPLE AND NOT USING_LINUXBREW")
   set(UTIL_LIBS ${UTIL_LIBS} atomic)
 endif()
+set(UTIL_LIBS ${UTIL_LIBS} atomic)
 
 if(NOT APPLE)
   set(UTIL_LIBS

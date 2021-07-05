@@ -87,6 +87,7 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/xlogreader.h"
+#include "port/pg_crc32c.h"
 #include "catalog/pg_type.h"
 #include "catalog/storage.h"
 #include "funcapi.h"

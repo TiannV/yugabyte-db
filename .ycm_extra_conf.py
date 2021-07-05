@@ -46,7 +46,7 @@ flags = [
     '-Dintegration_tests_EXPORTS',
     '-D__STDC_FORMAT_MACROS',
     '-fno-strict-aliasing',
-    '-msse4.2',
+    #'-msse4.2',
     '-Wall',
     '-Wno-sign-compare',
     '-Wno-deprecated',

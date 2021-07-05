@@ -46,7 +46,7 @@ include(YugabyteFunctions)
 include(YugabyteTesting)
 
 ADD_CXX_FLAGS("-Werror")
-ADD_CXX_FLAGS("-fno-strict-aliasing -msse4.2 -Wall -Wno-sign-compare -Wno-deprecated")
+ADD_CXX_FLAGS("-fno-strict-aliasing  -Wall -Wno-sign-compare -Wno-deprecated")
 ADD_CXX_FLAGS("-Winvalid-pch")
 ADD_CXX_FLAGS("-pthread -DBOOST_BIND_NO_PLACEHOLDERS")
 ADD_LINKER_FLAGS("-pthread")
@@ -289,8 +289,8 @@ message("Using COMPILER_FAMILY=${COMPILER_FAMILY}")
 # We can only use IS_CLANG after calling VALIDATE_COMPILER_TYPE.
 if (NOT APPLE)
   # To enable 16-byte atomics support we should specify appropriate architecture.
-  ADD_CXX_FLAGS("-march=ivybridge")
-  ADD_CXX_FLAGS("-mcx16")
+  ADD_CXX_FLAGS("-march=armv8-a+crc")
+  #ADD_CXX_FLAGS("-mcx16") tianv
 endif()
 
 # Include compiler type and version in the compiler command line so that binaries built by different
@@ -315,7 +315,7 @@ if(NOT APPLE)
   # (-mno-abm and -mno-movbe) that are not recognized by some clang versions we are using, so they
   # are being added in the gcc-specific section below.  We have also found that these flags don't
   # work on Mac OS X, so we're not using them there.
-  ADD_CXX_FLAGS("-mno-avx -mno-bmi -mno-bmi2 -mno-fma")
+  #ADD_CXX_FLAGS("-mno-avx -mno-bmi -mno-bmi2 -mno-fma")
 endif()
 
 # We want access to the PRI* print format macros.
@@ -495,7 +495,8 @@ if (IS_CLANG)
     ADD_CXX_FLAGS("-Wno-c++17-compat-mangling")
   endif()
 elseif("${COMPILER_FAMILY}" STREQUAL "gcc")
-  ADD_CXX_FLAGS("-mno-abm -mno-movbe")
+  #ADD_CXX_FLAGS("-mno-abm -mno-movbe")
+  ADD_CXX_FLAGS("-Wno-implicit-fallthrough")
 else()
   message(FATAL_ERROR "Unknown compiler family: ${COMPILER_FAMILY}")
 endif()

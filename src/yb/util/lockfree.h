@@ -100,7 +100,7 @@ template <class T>
 class LockFreeStack {
  public:
   LockFreeStack() {
-    CHECK(head_.is_lock_free());
+    //CHECK(head_.is_lock_free());
   }
 
   void Push(T* value) {

@@ -77,6 +77,16 @@ inline int64 CycleClock::Now() {
 }
 
 // ----------------------------------------------------------------
+#elif defined(__aarch64__)
+inline int64 CycleClock::Now() {
+  int64 virtual_timer_value;
+
+  asm volatile("mrs %0, cntvct_el0" : "=r"(virtual_timer_value));
+
+  return virtual_timer_value;
+}
+
+// ----------------------------------------------------------------
 #elif defined(__i386__)
 inline int64 CycleClock::Now() {
   int64 ret;

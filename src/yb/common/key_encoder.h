@@ -1,43 +1,15 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-//
-// The following only applies to changes made to this file as part of YugaByte development.
-//
-// Portions Copyright (c) YugaByte, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
-// in compliance with the License.  You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied.  See the License for the specific language governing permissions and limitations
-// under the License.
-//
-
 #ifndef YB_COMMON_KEY_ENCODER_H
 #define YB_COMMON_KEY_ENCODER_H
 
-#include <arpa/inet.h>
-#include <nmmintrin.h>
-#include <string.h>
+#ifndef __aarch64__
+#include <emmintrin.h>
+#include <smmintrin.h>
+#endif
 
 #include <climits>
+#include <cstdint>
+#include <cstring>
+#include <ostream>
 
 #include "yb/common/types.h"
 #include "yb/gutil/endian.h"
@@ -306,6 +278,9 @@ struct KeyEncoderTraits<BINARY, Buffer> {
   // REQUIRES: len == 16 or 8
   template<int LEN>
   static bool SSEEncodeChunk(const uint8_t** srcp, uint8_t** dstp) {
+    #ifdef __aarch64__
+    return false;
+    #else
     COMPILE_ASSERT(LEN == 16 || LEN == 8, invalid_length);
     __m128i data;
     if (LEN == 16) {
@@ -342,6 +317,7 @@ struct KeyEncoderTraits<BINARY, Buffer> {
     *dstp += LEN;
     *srcp += LEN;
     return true;
+    #endif //__aarch64__
   }
 
   // Non-SSE loop which encodes 'len' bytes from 'srcp' into 'dst'.

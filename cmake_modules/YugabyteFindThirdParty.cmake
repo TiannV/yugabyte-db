@@ -262,7 +262,7 @@ endif()
 
 # Find Boost static libraries.
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost COMPONENTS system thread REQUIRED)
+find_package(Boost COMPONENTS system thread atomic REQUIRED)
 show_found_boost_details("static")
 
 set(BOOST_STATIC_LIBS ${Boost_LIBRARIES})
